@@ -1,9 +1,9 @@
 {
     "id": "oh-zhiyuan-plugins",
     "name": "Oh Zhiyuan",
-    "version": "0.1.3",
-    "minAppVersion": "1.1.0",
-    "description": "Open a Markdown note's folder in the default macOS terminal from the note header.",
+    "version": "0.2.0",
+    "minAppVersion": "1.10.0",
+    "description": "日历、文件导航、大纲、代码高亮、文字样式与终端工具。",
     "author": "wangzhy",
     "authorUrl": "https://github.com/iwangzhy",
     "isDesktopOnly": true

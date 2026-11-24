@@ -9,7 +9,7 @@ const { runInNewContext } = require("node:vm");
 const entry = require.resolve("../main.js");
 const bundle = readFileSync(entry, "utf8");
 
-function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = {}) {
+async function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = {}) {
     const root = mkdtempSync(join(tmpdir(), "note-terminal-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const views = [];
@@ -32,7 +32,8 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
         }
     }
     const app = {
-        vault: { adapter: new FileSystemAdapter() },
+        plugins: { enabledPlugins: new Set() },
+        vault: { adapter: new FileSystemAdapter(), configDir: ".obsidian" },
         workspace: {
             getLeavesOfType: () => views.map(view => ({ view })),
             on: (name, handler) => events.set(name, handler),
@@ -59,12 +60,22 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
     const obsidian = {
         Plugin: class {
             #cleanup = [];
+            constructor(app, manifest) { this.app = app; this.manifest = manifest; }
+            load() { this.onload(); }
+            addSettingTab() {}
+            async loadData() {
+                const names = ["Calendar", "Quick Explorer", "Quiet Outline", "Open In New Tab", "Style Text",
+                    "Editor Syntax Highlight", "Shiki Highlighter", "Show Current File Path", "在终端中打开笔记目录"];
+                return Object.fromEntries(names.map(name => [name, { enabled: name === "在终端中打开笔记目录", options: {} }]));
+            }
             registerEvent() {}
             register(callback) { this.#cleanup.push(callback); }
             unload() {
+                this.onunload?.();
                 for (const callback of this.#cleanup.splice(0)) callback();
             }
         },
+        PluginSettingTab: class {},
         Notice: class { constructor(message) { notices.push(message); } },
         Platform: { isDesktopApp: true, isMacOS },
         FileSystemAdapter, MarkdownView,
@@ -87,7 +98,7 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
     });
     const pluginModule = { exports: {} };
     runInNewContext(bundle, {
-        module: pluginModule,
+        module: pluginModule, structuredClone,
         require(name) {
             if (name === "obsidian") return obsidian;
             if (name === "node:child_process") return { execFile };
@@ -96,7 +107,7 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
     }, { filename: entry });
     const plugin = new pluginModule.exports.default();
     plugin.app = app;
-    plugin.onload();
+    await plugin.onload();
     function addPane(path) {
         const view = new MarkdownView(path);
         views.push(view);
@@ -107,7 +118,7 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
 }
 
 test("each pane opens its own folder and reads the current default terminal on click", async t => {
-    const { root, addPane, opened, system } = fixture(t);
+    const { root, addPane, opened, system } = await fixture(t);
     const subfolder = "Sam's notes & 草稿";
     mkdirSync(join(root, subfolder));
     const left = addPane("/");
@@ -127,7 +138,7 @@ test("each pane opens its own folder and reads the current default terminal on c
 });
 
 test("a deleted folder or a file in its place never reaches the terminal", async t => {
-    const { root, addPane, opened, notices } = fixture(t);
+    const { root, addPane, opened, notices } = await fixture(t);
     const [button] = addPane("Drafts").actions;
     await button.click();
     writeFileSync(join(root, "Drafts"), "draft");
@@ -138,7 +149,7 @@ test("a deleted folder or a file in its place never reaches the terminal", async
 });
 
 test("an unconfigured terminal shows a localized notice on older Obsidian versions", async t => {
-    const { addPane, opened, notices, system } = fixture(t, { language: "zh-cn", legacyLocale: true });
+    const { addPane, opened, notices, system } = await fixture(t, { language: "zh-cn", legacyLocale: true });
     system.terminal = "\n";
     const [button] = addPane("/").actions;
     assert.equal(button.title, "在终端中打开笔记所在目录");
@@ -148,7 +159,7 @@ test("an unconfigured terminal shows a localized notice on older Obsidian versio
 });
 
 test("terminal lookup and launch failures report command error output", async t => {
-    const { addPane, notices, opened, system } = fixture(t);
+    const { addPane, notices, opened, system } = await fixture(t);
     const [button] = addPane("/").actions;
     system.failures.set("/usr/bin/osascript", "Launch Services unavailable\n");
     await button.click();
@@ -160,8 +171,8 @@ test("terminal lookup and launch failures report command error output", async t 
     assert.deepEqual(opened, []);
 });
 
-test("refresh, pane removal and plugin unload clean up header actions", t => {
-    const { addPane, views, events, plugin } = fixture(t);
+test("refresh, pane removal and plugin unload clean up header actions", async t => {
+    const { addPane, views, events, plugin } = await fixture(t);
     const left = addPane("/");
     const right = addPane("/");
     events.get("file-open")();
@@ -174,8 +185,8 @@ test("refresh, pane removal and plugin unload clean up header actions", t => {
     assert.equal(left.actions.size, 0);
 });
 
-test("other desktop platforms have no header action or workspace listeners", t => {
-    const { addPane, events } = fixture(t, { isMacOS: false });
+test("other desktop platforms have no header action or workspace listeners", async t => {
+    const { addPane, events } = await fixture(t, { isMacOS: false });
     assert.equal(addPane("/").actions.size, 0);
     assert.equal(events.size, 0);
 });

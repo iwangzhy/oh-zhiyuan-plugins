@@ -23,4 +23,4 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - name: Record build checksums
-        run: sha256sum main.js manifest.json LICENSE
+        run: sha256sum main.js manifest.json styles.css LICENSE

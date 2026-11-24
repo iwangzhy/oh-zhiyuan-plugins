@@ -1,0 +1,16 @@
+.oh-module > summary {
+    align-items: center;
+    cursor: pointer;
+    display: flex;
+}
+.oh-module > summary::before {
+    color: var(--text-faint);
+    content: "▸";
+    margin-inline-end: .7em;
+}
+.oh-module[open] > summary::before { content: "▾"; }
+.oh-module > summary .setting-item { flex: 1; border: 0; }
+.oh-module { border-bottom: 1px solid var(--background-modifier-border); }
+.oh-module-options { padding-inline-start: 1.35em; }
+.oh-module-options > .vertical-tab-content { padding: 0; }
+.oh-module-options .setting-item-control textarea { min-height: 3em; }
