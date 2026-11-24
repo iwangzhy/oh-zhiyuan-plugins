@@ -1,0 +1,152 @@
+const assert = require("node:assert/strict");
+const { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
+const { test } = require("node:test");
+const { promisify } = require("node:util");
+const { runInNewContext } = require("node:vm");
+
+const entry = require.resolve("../main.js");
+const bundle = readFileSync(entry, "utf8");
+
+function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = {}) {
+    const root = mkdtempSync(join(tmpdir(), "note-terminal-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const views = [];
+    const notices = [];
+    const events = new Map();
+    const opened = [];
+    const system = { terminal: "com.apple.Terminal" };
+
+    class FileSystemAdapter {
+        getBasePath() { return root; }
+        getFullPath(path) { return join(root, path); }
+    }
+    const app = {
+        vault: { adapter: new FileSystemAdapter() },
+        workspace: {
+            getLeavesOfType: () => views.map(view => ({ view })),
+            on: (name, handler) => events.set(name, handler),
+            onLayoutReady: handler => events.set("ready", handler),
+        },
+    };
+    class MarkdownView {
+        constructor(path) {
+            this.app = app;
+            this.file = { parent: { path, isRoot: () => path === "/" } };
+            this.actions = new Set();
+        }
+        addAction(icon, title, click) {
+            const action = {
+                title, click,
+                toggleAttribute() {},
+                setAttribute() {},
+                remove: () => this.actions.delete(action),
+            };
+            this.actions.add(action);
+            return action;
+        }
+    }
+    const obsidian = {
+        Plugin: class {
+            #cleanup = [];
+            registerEvent() {}
+            register(callback) { this.#cleanup.push(callback); }
+            unload() {
+                for (const callback of this.#cleanup.splice(0)) callback();
+            }
+        },
+        Notice: class { constructor(message) { notices.push(message); } },
+        Platform: { isDesktopApp: true, isMacOS },
+        FileSystemAdapter, MarkdownView,
+        getLanguage: legacyLocale ? undefined : () => language,
+        moment: { locale: () => language },
+    };
+    const execFile = t.mock.fn();
+    execFile[promisify.custom] = async (command, args) => {
+        if (command === "/usr/bin/osascript") return { stdout: system.terminal };
+        assert.equal(command, "/usr/bin/open");
+        opened.push(Array.from(args));
+        return { stdout: "" };
+    };
+    const pluginModule = { exports: {} };
+    runInNewContext(bundle, {
+        module: pluginModule,
+        require(name) {
+            if (name === "obsidian") return obsidian;
+            if (name === "node:child_process") return { execFile };
+            return require(name);
+        },
+    }, { filename: entry });
+    const plugin = new pluginModule.exports.default();
+    plugin.app = app;
+    plugin.onload();
+    function addPane(path) {
+        const view = new MarkdownView(path);
+        views.push(view);
+        events.get("layout-change")?.();
+        return view;
+    }
+    return { root, views, notices, opened, system, events, plugin, addPane };
+}
+
+test("each pane opens its own folder and reads the current default terminal on click", async t => {
+    const { root, addPane, opened, system } = fixture(t);
+    const subfolder = "Sam's notes & 草稿";
+    mkdirSync(join(root, subfolder));
+    const left = addPane("/");
+    const right = addPane(subfolder);
+    const [openLeft] = left.actions;
+    const [openRight] = right.actions;
+    await openRight.click();
+    system.terminal = "com.googlecode.iterm2";
+    await openLeft.click();
+    left.file = right.file;
+    await openLeft.click();
+    assert.deepEqual(opened, [
+        ["-b", "com.apple.Terminal", join(root, subfolder) + "/"],
+        ["-b", "com.googlecode.iterm2", root + "/"],
+        ["-b", "com.googlecode.iterm2", join(root, subfolder) + "/"],
+    ]);
+});
+
+test("a deleted folder or a file in its place never reaches the terminal", async t => {
+    const { root, addPane, opened, notices } = fixture(t);
+    const [button] = addPane("Drafts").actions;
+    await button.click();
+    writeFileSync(join(root, "Drafts"), "draft");
+    await button.click();
+    assert.match(notices[0], /Folder not found/);
+    assert.match(notices[1], /no longer a folder/);
+    assert.deepEqual(opened, []);
+});
+
+test("an unconfigured terminal shows a localized notice on older Obsidian versions", async t => {
+    const { addPane, opened, notices, system } = fixture(t, { language: "zh-cn", legacyLocale: true });
+    system.terminal = "\n";
+    const [button] = addPane("/").actions;
+    assert.equal(button.title, "在终端中打开笔记所在目录");
+    await button.click();
+    assert.match(notices[0], /默认终端/);
+    assert.deepEqual(opened, []);
+});
+
+test("refresh, pane removal and plugin unload clean up header actions", t => {
+    const { addPane, views, events, plugin } = fixture(t);
+    const left = addPane("/");
+    const right = addPane("/");
+    events.get("file-open")();
+    assert.equal(left.actions.size, 1);
+    views.pop();
+    events.get("layout-change")();
+    assert.equal(right.actions.size, 0);
+    plugin.unload();
+    events.get("ready")();
+    assert.equal(left.actions.size, 0);
+});
+
+test("other desktop platforms have no header action or workspace listeners", t => {
+    const { addPane, events } = fixture(t, { isMacOS: false });
+    assert.equal(addPane("/").actions.size, 0);
+    assert.equal(events.size, 0);
+});

@@ -1,0 +1,10 @@
+{
+    "id": "oh-zhiyuan-plugins",
+    "name": "My Obsidian Plugins",
+    "version": "0.1.0",
+    "minAppVersion": "1.1.0",
+    "description": "Open a Markdown note's folder in the default macOS terminal from the note header.",
+    "author": "wangzhy",
+    "authorUrl": "https://github.com/iwangzhy",
+    "isDesktopOnly": true
+}
