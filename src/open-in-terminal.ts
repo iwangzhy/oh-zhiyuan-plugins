@@ -1,9 +1,5 @@
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { promisify } from "node:util";
-import { FileSystemAdapter, MarkdownView, Notice, Platform, getLanguage, moment, type Plugin } from "obsidian";
-
-const run = promisify(execFile);
+import { FileSystemAdapter, MarkdownView, Notice, Platform, getLanguage, moment, requireApiVersion, type Plugin } from "obsidian";
 
 // iTerm2 的「设为默认终端」修改的是 Shell 角色，同一文件类型还可以单独关联编辑器。
 const defaultTerminalQuery = `function run() {
@@ -16,13 +12,27 @@ const defaultTerminalQuery = `function run() {
 
 function uiText(english: string, chinese: string): string {
     // 1.8.7 以前没有 getLanguage()，旧版沿用 Obsidian 配置的日期语言。
-    const language = getLanguage?.() ?? moment.locale();
+    const language = requireApiVersion("1.8.7") ? getLanguage() : moment.locale();
     return language.startsWith("zh") ? chinese : english;
 }
 
-function commandErrorMessage(error: unknown): string {
-    const failure = error as Error & { stderr?: string };
-    return failure?.stderr?.trim() || failure?.message || String(error);
+function runTerminalCommand(program: "/usr/bin/osascript" | "/usr/bin/open", args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+        execFile(program, args, { encoding: "utf8", shell: false }, (error: Error | null, stdout: string, stderr: string) => {
+            if (error) {
+                reject(new Error(stderr.trim() || error.message));
+                return;
+            }
+            resolve(stdout);
+        });
+    });
+}
+
+function errorMessage(error: unknown): string {
+    if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
+        return error.message;
+    }
+    return String(error);
 }
 
 async function openNoteFolder(view: MarkdownView): Promise<void> {
@@ -38,10 +48,9 @@ async function openNoteFolder(view: MarkdownView): Promise<void> {
 
     let bundleId: string;
     try {
-        const { stdout } = await run("/usr/bin/osascript", ["-l", "JavaScript", "-e", defaultTerminalQuery]);
-        bundleId = stdout.trim();
+        bundleId = (await runTerminalCommand("/usr/bin/osascript", ["-l", "JavaScript", "-e", defaultTerminalQuery])).trim();
     } catch (error) {
-        const reason = commandErrorMessage(error);
+        const reason = errorMessage(error);
         new Notice(uiText(`Could not find the default macOS terminal: ${reason}`, `无法读取 macOS 的默认终端：${reason}`));
         return;
     }
@@ -56,29 +65,31 @@ async function openNoteFolder(view: MarkdownView): Promise<void> {
     let directory = parent.path;
     try {
         directory = parent.isRoot() ? adapter.getBasePath() : adapter.getFullPath(parent.path);
-        // 查找默认终端可能需要一点时间，在打开前再检查，避免把同名文件交给终端。
-        if (!(await stat(directory)).isDirectory()) {
+        // 查找默认终端期间笔记目录可能已变化，通过库内路径重新检查。
+        const folder = await adapter.stat(parent.path);
+        if (!folder) throw new Error(uiText("Folder not found", "目录不存在"));
+        if (folder.type !== "folder") {
             new Notice(uiText(`This path is no longer a folder: ${directory}`, `笔记所在的路径已不是目录：${directory}`));
             return;
         }
     } catch (error) {
-        const failure = error as NodeJS.ErrnoException;
+        const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
         const reasons: Record<string, string | undefined> = {
             ENOENT: uiText("Folder not found", "目录不存在"),
             ENOTDIR: uiText("Part of the path is not a folder", "路径中有一项不是目录"),
             EACCES: uiText("Permission denied", "没有访问权限"),
             EPERM: uiText("Permission denied", "没有访问权限"),
         };
-        const reason = reasons[failure?.code ?? ""] ?? failure?.message ?? String(error);
+        const reason = (typeof code === "string" ? reasons[code] : undefined) ?? errorMessage(error);
         new Notice(uiText(`Cannot access “${directory}”: ${reason}`, `无法访问「${directory}」：${reason}`));
         return;
     }
 
     try {
         const folderPath = directory.endsWith("/") ? directory : `${directory}/`;
-        await run("/usr/bin/open", ["-b", bundleId, folderPath]);
+        await runTerminalCommand("/usr/bin/open", ["-b", bundleId, folderPath]);
     } catch (error) {
-        const reason = commandErrorMessage(error);
+        const reason = errorMessage(error);
         new Notice(uiText(
             `The default terminal could not open “${directory}”: ${reason}`,
             `默认终端无法打开「${directory}」：${reason}`,

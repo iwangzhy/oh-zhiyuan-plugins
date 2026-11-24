@@ -20,7 +20,7 @@ To update a manual installation, replace both files and reload the plugin.
 
 ## Local access
 
-On each click, the plugin calls `/usr/bin/osascript` to look up the default terminal through macOS Launch Services. It checks the note's parent folder and passes its absolute path to `/usr/bin/open`. These operations run locally.
+On each click, the plugin queries the default terminal through macOS Launch Services using `/usr/bin/osascript`. It checks the note's parent folder through Obsidian's vault adapter, then passes the absolute path to `/usr/bin/open`. The plugin launches these two system programs directly with separate arguments. These operations run locally.
 
 ## Development
 

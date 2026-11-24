@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
 const { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { stat } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { promisify } = require("node:util");
 const { runInNewContext } = require("node:vm");
 
 const entry = require.resolve("../main.js");
@@ -16,11 +16,20 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
     const notices = [];
     const events = new Map();
     const opened = [];
-    const system = { terminal: "com.apple.Terminal" };
+    const system = { terminal: "com.apple.Terminal", failures: new Map() };
 
     class FileSystemAdapter {
         getBasePath() { return root; }
         getFullPath(path) { return join(root, path); }
+        async stat(path) {
+            try {
+                const info = await stat(this.getFullPath(path));
+                return { type: info.isDirectory() ? "folder" : "file" };
+            } catch (error) {
+                if (error.code === "ENOENT") return null;
+                throw error;
+            }
+        }
     }
     const app = {
         vault: { adapter: new FileSystemAdapter() },
@@ -59,16 +68,23 @@ function fixture(t, { isMacOS = true, language = "en", legacyLocale = false } = 
         Notice: class { constructor(message) { notices.push(message); } },
         Platform: { isDesktopApp: true, isMacOS },
         FileSystemAdapter, MarkdownView,
+        requireApiVersion: version => {
+            assert.equal(version, "1.8.7");
+            return !legacyLocale;
+        },
         getLanguage: legacyLocale ? undefined : () => language,
         moment: { locale: () => language },
     };
-    const execFile = t.mock.fn();
-    execFile[promisify.custom] = async (command, args) => {
-        if (command === "/usr/bin/osascript") return { stdout: system.terminal };
+    const execFile = t.mock.fn((command, args, options, done) => {
+        assert.equal(options.encoding, "utf8");
+        assert.equal(options.shell, false);
+        const failure = system.failures.get(command);
+        if (failure) return done(new Error("Command failed"), "", failure);
+        if (command === "/usr/bin/osascript") return done(null, system.terminal, "");
         assert.equal(command, "/usr/bin/open");
         opened.push(Array.from(args));
-        return { stdout: "" };
-    };
+        done(null, "", "");
+    });
     const pluginModule = { exports: {} };
     runInNewContext(bundle, {
         module: pluginModule,
@@ -128,6 +144,19 @@ test("an unconfigured terminal shows a localized notice on older Obsidian versio
     assert.equal(button.title, "在终端中打开笔记所在目录");
     await button.click();
     assert.match(notices[0], /默认终端/);
+    assert.deepEqual(opened, []);
+});
+
+test("terminal lookup and launch failures report command error output", async t => {
+    const { addPane, notices, opened, system } = fixture(t);
+    const [button] = addPane("/").actions;
+    system.failures.set("/usr/bin/osascript", "Launch Services unavailable\n");
+    await button.click();
+    system.failures.delete("/usr/bin/osascript");
+    system.failures.set("/usr/bin/open", "Terminal launch failed\n");
+    await button.click();
+    assert.match(notices[0], /Could not find the default macOS terminal: Launch Services unavailable$/);
+    assert.match(notices[1], /The default terminal could not open .*: Terminal launch failed$/);
     assert.deepEqual(opened, []);
 });
 

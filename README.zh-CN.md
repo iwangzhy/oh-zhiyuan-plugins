@@ -20,7 +20,7 @@
 
 ## 本机访问
 
-点击图标时，插件调用 `/usr/bin/osascript`，通过 macOS Launch Services 查询默认终端。插件检查笔记所在目录，再把绝对路径交给 `/usr/bin/open`。这些操作都在本机完成。
+点击图标时，插件调用 `/usr/bin/osascript`，通过 macOS Launch Services 查询默认终端。它用 Obsidian 的笔记库接口检查目录，再把绝对路径交给 `/usr/bin/open`。两个系统程序均为直接调用，参数逐项传递。这些操作都在本机完成。
 
 ## 开发
 
