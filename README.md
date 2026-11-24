@@ -1,4 +1,6 @@
-# My Obsidian Plugins
+# Oh Zhiyuan
+
+Open a Markdown note's folder in your default macOS terminal from the note header.
 
 ## 在终端中打开笔记目录
 
@@ -17,10 +19,14 @@ npm run dev
 
 此功能适用于 macOS 上的 Obsidian 1.1.0 及以上版本。
 
-将 `main.js` 和 `manifest.json` 复制到测试库的 `.obsidian/plugins/oh-zhiyuan-plugins/` 目录，然后在 Obsidian 的「设置 → 第三方插件」中启用 **My Obsidian Plugins**。
+从同一个 Release 下载 `main.js` 和 `manifest.json`，将它们复制到笔记库的 `.obsidian/plugins/oh-zhiyuan-plugins/` 目录，然后在 Obsidian 的「设置 → 第三方插件」中启用 **Oh Zhiyuan**。使用自定义配置文件夹时，请替换路径里的 `.obsidian`。 [GitHub Releases](https://github.com/iwangzhy/oh-zhiyuan-plugins/releases)
 
 已安装 **My Open in Terminal** 的库可以先停用原插件，避免笔记标题栏显示两个终端按钮。
 
-提交官方社区目录前，需要调整插件显示名称以符合命名要求。 [Obsidian 插件命名规则](https://docs.obsidian.md/Reference/Manifest)
+## 本机访问
 
-终端功能沿用原插件的 MIT 许可。 [原插件许可证](LICENSE.my-open-in-terminal)
+点击终端图标时，插件调用 macOS 的 `/usr/bin/osascript`，通过 Launch Services 查询当前默认终端，然后检查笔记所在目录并将绝对路径交给 `/usr/bin/open`。查询和打开目录都在本机完成。
+
+## 许可证
+
+本项目采用 MIT 许可。终端功能迁自同作者的 My Open in Terminal，保留了原版权声明。 [MIT 许可证](LICENSE)

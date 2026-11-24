@@ -1,7 +1,8 @@
 {
     "name": "oh-zhiyuan-plugins",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "private": true,
+    "license": "MIT",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs --watch",
